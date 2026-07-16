@@ -563,7 +563,7 @@ export default function Home() {
             <p className="eyebrow">TODAY&apos;S DEFAULT</p>
             <div className="decision-title-row">
               <h1 id="today-title">先不行动。</h1>
-              <span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date())}</span>
+              <span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", timeZone: "Asia/Shanghai" }).format(new Date())}</span>
             </div>
             <p className="decision-copy">
               除非行业龙头、商业确定性、安全边际和仓位上限同时成立。错过机会不会伤害组合，失去纪律会。

@@ -22,6 +22,7 @@ test("renders the investment decision cockpit", async () => {
   assert.match(page, /PORTFOLIO REALITY/);
   assert.match(page, /保存组合快照/);
   assert.match(page, /不把静态数据冒充实时行情/);
+  assert.match(page, /timeZone: "Asia\/Shanghai"/);
   assert.match(page, /关注不等于买入建议/);
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(page + layout, /codex-preview|react-loading-skeleton/);
