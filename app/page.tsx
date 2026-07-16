@@ -18,6 +18,17 @@ type WatchItem = {
   risk: string;
 };
 
+type AccountSecurity = {
+  ticker: string;
+  name: string;
+};
+
+type AccountGroup = {
+  id: string;
+  name: string;
+  securities: AccountSecurity[];
+};
+
 type TradeEntry = {
   id: string;
   date: string;
@@ -143,6 +154,74 @@ const watchlist: WatchItem[] = [
   },
 ];
 
+const accountGroups: AccountGroup[] = [
+  {
+    id: "technology",
+    name: "科技",
+    securities: [
+      { ticker: "SPCX", name: "SpaceX" },
+      { ticker: "NVDA", name: "NVIDIA" },
+      { ticker: "GOOGL", name: "Alphabet" },
+      { ticker: "AMZN", name: "Amazon" },
+      { ticker: "AAPL", name: "Apple" },
+      { ticker: "TSLA", name: "Tesla" },
+      { ticker: "META", name: "Meta Platforms" },
+      { ticker: "MSFT", name: "Microsoft" },
+    ],
+  },
+  {
+    id: "crypto",
+    name: "加密货币",
+    securities: [
+      { ticker: "BMNR", name: "BitMine Immersion Tech" },
+      { ticker: "CRCL", name: "Circle" },
+      { ticker: "MSTR", name: "Strategy" },
+      { ticker: "COIN", name: "Coinbase" },
+      { ticker: "MARA", name: "Mara" },
+    ],
+  },
+  {
+    id: "semiconductor",
+    name: "半导体",
+    securities: [
+      { ticker: "SOXL", name: "Direxion Semicon Bull 3X" },
+      { ticker: "TSM", name: "Taiwan Semiconductor" },
+      { ticker: "AMD", name: "AMD" },
+      { ticker: "INTC", name: "Intel" },
+    ],
+  },
+  {
+    id: "finance",
+    name: "金融",
+    securities: [
+      { ticker: "BRK.B", name: "Berkshire Hathaway B" },
+      { ticker: "HOOD", name: "Robinhood" },
+      { ticker: "BAC", name: "Bank of America" },
+      { ticker: "JPM", name: "JPMorgan Chase" },
+      { ticker: "SOFI", name: "SoFi Tech" },
+    ],
+  },
+  {
+    id: "storage",
+    name: "存储",
+    securities: [
+      { ticker: "SNDK", name: "Sandisk" },
+      { ticker: "MU", name: "Micron Tech" },
+      { ticker: "DRAM", name: "Roundhill Memory ETF" },
+    ],
+  },
+];
+
+const accountSecurities = accountGroups.flatMap((group) =>
+  group.securities.map((security) => ({ ...security, groupId: group.id, groupName: group.name })),
+);
+
+const tradeSecurities = [
+  ...accountSecurities,
+  { ticker: "BTC", name: "Bitcoin", groupId: "core", groupName: "策略核心" },
+  { ticker: "COST", name: "Costco", groupId: "research", groupName: "研究档案" },
+].filter((security, index, collection) => collection.findIndex((item) => item.ticker === security.ticker) === index);
+
 const gateLabels: Record<GateKey, string> = {
   leader: "它是行业龙头或拥有不可替代的网络效应",
   understood: "我能用三句话解释它如何赚钱",
@@ -219,6 +298,7 @@ function downloadCsv(entries: TradeEntry[]) {
 export default function Home() {
   const [trade, setTrade] = useState<TradeEntry>(defaultTrade);
   const [entries, setEntries] = useState<TradeEntry[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState("technology");
   const [activeTicker, setActiveTicker] = useState("GOOGL");
   const [weeklyNotes, setWeeklyNotes] = useState("本周只在高确定性资产出现安全边际时行动；没有好价格，现金也是仓位。");
   const [syncState, setSyncState] = useState<"loading" | "ready" | "saving" | "error">("loading");
@@ -248,16 +328,20 @@ export default function Home() {
   }, []);
 
   const ranked = useMemo(() => [...watchlist].sort((a, b) => score(b) - score(a)), []);
-  const active = watchlist.find((item) => item.ticker === activeTicker) ?? ranked[0];
+  const activeGroup = accountGroups.find((group) => group.id === activeGroupId) ?? accountGroups[0];
+  const activeSecurity = accountSecurities.find((item) => item.ticker === activeTicker) ?? accountSecurities[0];
+  const activeProfile = watchlist.find((item) => item.ticker === activeTicker);
   const generatedReason = buildReason(trade);
   const buyZoneCount = watchlist.filter((item) => item.action === "Buy zone").length;
   const waitCount = watchlist.filter((item) => item.action === "Wait").length;
+  const accountSecurityCount = accountSecurities.length;
   const allGatesPassed = (Object.keys(gateLabels) as GateKey[]).every((gate) => trade.gates.includes(gate));
   const canSave = trade.action === "不行动" || allGatesPassed;
 
   const weeklySummary = [
     `本周动作：共记录 ${entries.length} 笔决策，其中 ${entries.filter((entry) => entry.action === "买入" || entry.action === "加仓").length} 笔增加风险敞口。`,
-    `观察池：买入研究区 ${buyZoneCount} 个，等待价格 ${waitCount} 个。当前优先研究 ${ranked[0].ticker}，策略分 ${score(ranked[0])}/100。`,
+    `观察池：Longbridge 自选包含 ${accountGroups.length} 个分组、${accountSecurityCount} 个标的；其中 ${watchlist.filter((item) => accountSecurities.some((security) => security.ticker === item.ticker)).length} 个已有个人研究档案。`,
+    `策略基线：买入研究区 ${buyZoneCount} 个，等待价格 ${waitCount} 个。当前优先研究 ${ranked[0].ticker}，策略分 ${score(ranked[0])}/100。`,
     "纪律：先确认商业确定性与安全边际，再决定仓位；任何开单必须写清证伪条件。",
     `本周主观判断：${weeklyNotes}`,
   ].join("\n\n");
@@ -278,13 +362,21 @@ export default function Home() {
   function useAsTicket() {
     setTrade((current) => ({
       ...current,
-      ticker: active.ticker,
-      thesis: active.thesis,
-      risk: active.risk,
-      valuation: `策略估值分 ${active.valuation}/100；只有在目标回报率与安全边际同时满足时执行。`,
-      invalidation: active.risk,
+      ticker: activeSecurity.ticker,
+      thesis: activeProfile?.thesis ?? "先写清这家公司如何赚钱、竞争优势是否可持续，以及为什么现在值得研究。",
+      risk: activeProfile?.risk ?? "待补充：最可能导致长期投资逻辑失效的风险。",
+      valuation: activeProfile
+        ? `策略估值分 ${activeProfile.valuation}/100；只有在目标回报率与安全边际同时满足时执行。`
+        : "待补充：基于正常化自由现金流、合理增长率与保守退出估值计算安全边际。",
+      invalidation: activeProfile?.risk ?? "待补充：写出一个可验证、会证明当前判断错误的事实。",
+      gates: [],
     }));
     document.querySelector("#trade")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function selectGroup(group: AccountGroup) {
+    setActiveGroupId(group.id);
+    setActiveTicker(group.securities[0]?.ticker ?? "GOOGL");
   }
 
   async function saveTrade() {
@@ -366,7 +458,7 @@ export default function Home() {
             </p>
             <div className="signal-row">
               <div><span>可研究买入</span><strong>{buyZoneCount}</strong><small>先验证，不追价</small></div>
-              <div><span>等待价格</span><strong>{waitCount}</strong><small>好公司 ≠ 好价格</small></div>
+              <div><span>自选分组</span><strong>{accountGroups.length}</strong><small>{accountSecurityCount} 个关注标的</small></div>
               <div><span>本周决策</span><strong>{entries.length}</strong><small>包括“不行动”</small></div>
             </div>
             <div className="principle-strip">
@@ -397,54 +489,91 @@ export default function Home() {
 
       <section className="section-shell" aria-labelledby="watch-title">
         <div className="section-heading">
-          <div><p className="eyebrow">QUALITY × PRICE</p><h2 id="watch-title">候选资产优先级</h2></div>
-          <p>质量 68% · 估值 22% · 趋势 10% <span>策略基线，非实时行情</span></p>
+          <div><p className="eyebrow">LONGBRIDGE WATCHLIST</p><h2 id="watch-title">我的自选分组</h2></div>
+          <p>{accountGroups.length} 个分组 · {accountSecurityCount} 个标的 <span>同步于 2026-07-16 · 关注不等于买入建议</span></p>
         </div>
-        <div className="watch-grid">
-          {ranked.map((item, index) => (
+        <div className="group-tabs" role="tablist" aria-label="自选分组">
+          {accountGroups.map((group) => (
             <button
-              className={`asset-card ${activeTicker === item.ticker ? "is-active" : ""}`}
-              key={item.ticker}
-              onClick={() => setActiveTicker(item.ticker)}
+              aria-selected={activeGroup.id === group.id}
+              className={activeGroup.id === group.id ? "is-active" : ""}
+              key={group.id}
+              onClick={() => selectGroup(group)}
+              role="tab"
               type="button"
             >
-              <span className="rank">0{index + 1}</span>
-              <span className="asset-topline"><strong>{item.ticker}</strong><em>{score(item)}</em></span>
-              <span className="asset-name">{item.name}</span>
-              <span className="asset-meta">{item.className}</span>
-              <span className={`pill ${item.action.toLowerCase().replace(" ", "-")}`}>{recommendation(item)}</span>
+              <span>{group.name}</span><em>{group.securities.length}</em>
             </button>
           ))}
+        </div>
+        <div className="watch-grid">
+          {activeGroup.securities.map((security, index) => {
+            const profile = watchlist.find((item) => item.ticker === security.ticker);
+            return (
+              <button
+                className={`asset-card ${activeTicker === security.ticker ? "is-active" : ""} ${profile ? "" : "is-unscored"}`}
+                key={security.ticker}
+                onClick={() => setActiveTicker(security.ticker)}
+                type="button"
+              >
+                <span className="rank">{String(index + 1).padStart(2, "0")}</span>
+                <span className="asset-topline"><strong>{security.ticker}</strong><em>{profile ? score(profile) : "—"}</em></span>
+                <span className="asset-name">{security.name}</span>
+                <span className="asset-meta">{activeGroup.name}</span>
+                <span className={`pill ${profile ? profile.action.toLowerCase().replace(" ", "-") : "unscored"}`}>
+                  {profile ? recommendation(profile) : "待建立档案"}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
       <section className="section-shell detail-grid">
         <article className="detail-panel">
           <div className="panel-heading">
-            <div><p className="eyebrow">CURRENT FOCUS</p><h2>{active.ticker} <span>/ {active.name}</span></h2></div>
+            <div><p className="eyebrow">CURRENT FOCUS · {activeSecurity.groupName}</p><h2>{activeSecurity.ticker} <span>/ {activeSecurity.name}</span></h2></div>
             <button className="secondary-button" onClick={useAsTicket} type="button">带入开单表</button>
           </div>
-          <p className="lead">{active.thesis}</p>
-          <div className="score-bars">
-            {([
-              ["护城河", active.moat], ["确定性", active.certainty], ["估值", active.valuation],
-              ["资产负债", active.balance], ["趋势", active.momentum],
-            ] as [string, number][]).map(([label, value]) => (
-              <div className="bar-row" key={label}>
-                <span>{label}</span><div className="bar-track"><div style={{ width: `${value}%` }} /></div><strong>{value}</strong>
+          {activeProfile ? (
+            <>
+              <p className="lead">{activeProfile.thesis}</p>
+              <div className="score-bars">
+                {([
+                  ["护城河", activeProfile.moat], ["确定性", activeProfile.certainty], ["估值", activeProfile.valuation],
+                  ["资产负债", activeProfile.balance], ["趋势", activeProfile.momentum],
+                ] as [string, number][]).map(([label, value]) => (
+                  <div className="bar-row" key={label}>
+                    <span>{label}</span><div className="bar-track"><div style={{ width: `${value}%` }} /></div><strong>{value}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <div className="unscored-state">
+              <strong>已同步到自选，尚未建立研究档案</strong>
+              <p>我不会因为它出现在关注列表里就自动给出评分。完成商业模式、财务质量、估值与证伪条件后，才进入优先级排序。</p>
+              <span>下一步：写下三句话投资逻辑，再估算正常化自由现金流。</span>
+            </div>
+          )}
         </article>
 
         <article className="detail-panel thesis-panel">
           <p className="eyebrow">ACTION MEMO</p>
-          <div className="action-score"><h2>{recommendation(active)}</h2><strong>{active.targetWeight}</strong></div>
-          <dl>
-            <div><dt>进入条件</dt><dd>{active.trigger}</dd></div>
-            <div><dt>反方论点</dt><dd>{active.risk}</dd></div>
-            <div><dt>行动方式</dt><dd>满足条件后只开 1/4 计划仓位；下一次加仓必须重新通过五道门。</dd></div>
-          </dl>
+          <div className="action-score"><h2>{activeProfile ? recommendation(activeProfile) : "待研究"}</h2><strong>{activeProfile?.targetWeight ?? "—"}</strong></div>
+          {activeProfile ? (
+            <dl>
+              <div><dt>进入条件</dt><dd>{activeProfile.trigger}</dd></div>
+              <div><dt>反方论点</dt><dd>{activeProfile.risk}</dd></div>
+              <div><dt>行动方式</dt><dd>满足条件后只开 1/4 计划仓位；下一次加仓必须重新通过五道门。</dd></div>
+            </dl>
+          ) : (
+            <dl>
+              <div><dt>商业质量</dt><dd>收入来源、护城河、资本回报率与周期位置尚待验证。</dd></div>
+              <div><dt>估值纪律</dt><dd>没有正常化现金流与安全边际，就没有开单价格。</dd></div>
+              <div><dt>当前结论</dt><dd>只观察，不行动。先建立研究档案，再讨论仓位。</dd></div>
+            </dl>
+          )}
         </article>
       </section>
 
@@ -457,7 +586,7 @@ export default function Home() {
           <form className="ticket-panel" onSubmit={(event) => event.preventDefault()}>
             <div className="compact-fields">
               <label>日期<input type="date" value={trade.date} onChange={(event) => updateTrade("date", event.target.value)} /></label>
-              <label>标的<select value={trade.ticker} onChange={(event) => updateTrade("ticker", event.target.value)}>{watchlist.map((item) => <option key={item.ticker}>{item.ticker}</option>)}</select></label>
+              <label>标的<select value={trade.ticker} onChange={(event) => updateTrade("ticker", event.target.value)}>{tradeSecurities.map((item) => <option key={item.ticker} value={item.ticker}>{item.ticker} · {item.groupName}</option>)}</select></label>
               <label>动作<select value={trade.action} onChange={(event) => updateTrade("action", event.target.value)}><option>买入</option><option>加仓</option><option>减仓</option><option>不行动</option></select></label>
               <label>仓位<input value={trade.size} onChange={(event) => updateTrade("size", event.target.value)} /></label>
               <label>价格<input placeholder="可留空" value={trade.price} onChange={(event) => updateTrade("price", event.target.value)} /></label>

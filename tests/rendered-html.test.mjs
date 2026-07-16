@@ -13,6 +13,13 @@ test("renders the investment decision cockpit", async () => {
   assert.match(page, /先不行动/);
   assert.match(page, /开单前/);
   assert.match(page, /每周日 21:00/);
+  assert.match(page, /LONGBRIDGE WATCHLIST/);
+  assert.match(page, /科技/);
+  assert.match(page, /加密货币/);
+  assert.match(page, /半导体/);
+  assert.match(page, /金融/);
+  assert.match(page, /存储/);
+  assert.match(page, /关注不等于买入建议/);
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(page + layout, /codex-preview|react-loading-skeleton/);
 });
