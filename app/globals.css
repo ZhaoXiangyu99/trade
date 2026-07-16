@@ -21,6 +21,7 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .48; }
 a { color: inherit; text-decoration: none; }
+.sr-only { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0,0,0,0); white-space: nowrap; }
 
 .hero-shell { border-bottom: 1px solid var(--line); padding: 24px clamp(18px, 4vw, 58px) 46px; background: radial-gradient(circle at 78% 5%, rgba(134,185,143,.13), transparent 27%), linear-gradient(135deg, rgba(214,179,106,.08), transparent 34%), var(--bg); }
 .topbar { align-items: center; display: flex; justify-content: space-between; margin: 0 auto 44px; max-width: 1240px; }
@@ -73,6 +74,36 @@ a { color: inherit; text-decoration: none; }
 .section-heading { align-items: end; display: flex; justify-content: space-between; margin-bottom: 24px; }
 .section-heading > p { color: var(--muted); font-size: 12px; margin: 0; text-align: right; }
 .section-heading > p span { color: var(--gold); display: block; margin-top: 5px; }
+
+.portfolio-section { padding-bottom: 30px; }
+.portfolio-metrics { display: grid; gap: 10px; grid-template-columns: repeat(4,minmax(0,1fr)); margin-bottom: 12px; }
+.portfolio-metrics > div { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; display: grid; gap: 8px; min-height: 130px; padding: 18px; }
+.portfolio-metrics span, .portfolio-metrics small { color: var(--muted); font-size: 11px; }
+.portfolio-metrics strong { font-size: clamp(23px,2.4vw,34px); letter-spacing: -.035em; }
+.portfolio-metrics .is-negative, .position-table .is-negative { color: var(--red); }
+.position-table .is-positive { color: var(--green); }
+.portfolio-panel { background: rgba(17,21,19,.88); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.portfolio-toolbar { align-items: end; border-bottom: 1px solid var(--line); display: grid; gap: 12px; grid-template-columns: minmax(180px,.6fr) minmax(340px,1.4fr) auto; padding: 18px; }
+.add-position { align-items: end; display: grid; gap: 10px; grid-template-columns: 1fr auto; }
+.add-position .ghost-button, .portfolio-save { min-height: 43px; white-space: nowrap; }
+.portfolio-empty { padding: 42px 24px; text-align: center; }
+.portfolio-empty strong { display: block; font-size: 20px; margin-bottom: 8px; }
+.portfolio-empty p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0 auto; max-width: 620px; }
+.position-table-wrap { overflow-x: auto; }
+.position-table { border-collapse: collapse; min-width: 1040px; width: 100%; }
+.position-table th { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 14px 10px; text-align: left; text-transform: uppercase; }
+.position-table th:first-child, .position-table td:first-child { padding-left: 18px; }
+.position-table th:last-child, .position-table td:last-child { padding-right: 18px; }
+.position-table td { border-top: 1px solid var(--line); padding: 12px 10px; vertical-align: middle; }
+.position-table td > strong, .position-table td > small { display: block; }
+.position-table td > small { color: var(--muted); font-size: 10px; margin-top: 5px; max-width: 130px; }
+.position-table input { min-height: 38px; min-width: 86px; padding: 8px 9px; width: 100%; }
+.percent-input { align-items: center; display: flex; position: relative; }
+.percent-input span { color: var(--muted); font-size: 11px; pointer-events: none; position: absolute; right: 9px; }
+.percent-input input { padding-right: 24px; }
+.remove-position { background: transparent; border: 0; color: var(--red); font-size: 11px; padding: 8px 0; }
+.portfolio-alerts { border-top: 1px solid rgba(216,134,115,.25); display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 18px; }
+.portfolio-alerts span { background: rgba(216,134,115,.08); border: 1px solid rgba(216,134,115,.22); border-radius: 99px; color: #e1a292; font-size: 11px; padding: 7px 10px; }
 .group-tabs { border-bottom: 1px solid var(--line); display: flex; gap: 4px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 12px; }
 .group-tabs button { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 99px; color: var(--muted); display: flex; flex: 0 0 auto; font-size: 13px; font-weight: 750; gap: 9px; min-height: 38px; padding: 8px 14px; }
 .group-tabs button:hover { color: var(--ink); }
@@ -174,12 +205,14 @@ footer p { max-width: 560px; text-align: right; }
 
 @media (max-width: 1120px) {
   .hero-grid, .detail-grid, .trade-grid, .weekly-grid { grid-template-columns: 1fr; }
+  .portfolio-toolbar { grid-template-columns: 1fr 1.4fr; }
+  .portfolio-save { grid-column: 1/-1; }
   .watch-grid { grid-template-columns: repeat(auto-fill,minmax(140px,1fr)); }
   .compact-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }
 @media (max-width: 760px) {
   .topbar, .section-heading, footer { align-items: stretch; flex-direction: column; gap: 18px; }
-  .nav-actions { align-items: stretch; display: grid; grid-template-columns: 1fr 1fr; }
+  .nav-actions { align-items: stretch; display: grid; grid-template-columns: repeat(3,1fr); }
   .sync-status { grid-column: 1/-1; }
   .nav-actions > a { text-align: center; }
   .decision-panel { min-height: auto; padding: 30px 22px; }
@@ -188,6 +221,10 @@ footer p { max-width: 560px; text-align: right; }
   .signal-row { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .signal-row strong { font-size: 32px; }
   .principle-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .portfolio-metrics { grid-template-columns: 1fr 1fr; }
+  .portfolio-toolbar { grid-template-columns: 1fr; }
+  .add-position { grid-template-columns: 1fr; }
+  .portfolio-save { grid-column: auto; }
   .watch-grid { display: flex; margin-right: -18px; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x mandatory; }
   .asset-card { flex: 0 0 178px; scroll-snap-align: start; }
   .section-heading > p, footer p { text-align: left; }
@@ -196,6 +233,7 @@ footer p { max-width: 560px; text-align: right; }
 }
 @media (max-width: 520px) {
   .signal-row, .compact-fields, .split-fields { grid-template-columns: 1fr; }
+  .portfolio-metrics { grid-template-columns: 1fr; }
   .signal-row > div { min-height: 88px; }
   .allocation-visual { height: 108px; }
   .panel-heading { align-items: stretch; flex-direction: column; }
