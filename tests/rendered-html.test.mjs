@@ -20,8 +20,20 @@ test("renders the investment decision cockpit", async () => {
   assert.match(page, /金融/);
   assert.match(page, /存储/);
   assert.match(page, /关注不等于买入建议/);
+  assert.match(page, /MVRV Z-Score/);
+  assert.match(page, /市场市值 − 已实现市值/);
+  assert.match(page, /不会用演示数据替代/);
+  assert.match(page, /fetch\("\/api\/crypto\/mvrv-z"\)/);
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(page + layout, /codex-preview|react-loading-skeleton/);
+});
+
+test("proxies a validated live MVRV Z-Score feed", async () => {
+  const route = await readFile(new URL("../app/api/crypto/mvrv-z/route.ts", import.meta.url), "utf8");
+  assert.match(route, /https:\/\/btcfunk\.com\/api\/mvrv_zscore/);
+  assert.match(route, /invalid upstream payload/);
+  assert.match(route, /stale-while-revalidate/);
+  assert.doesNotMatch(route, /zScore:\s*[\d.]+/);
 });
 
 test("uses durable storage for the decision ledger", async () => {

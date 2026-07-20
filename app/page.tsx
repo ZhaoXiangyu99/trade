@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type WatchItem = {
   ticker: string;
@@ -45,6 +45,18 @@ type TradeEntry = {
 };
 
 type GateKey = "leader" | "understood" | "margin" | "sizing" | "invalidation";
+
+type MvrvPoint = { date: string; value: number };
+
+type MvrvData = {
+  status: "ready";
+  zScore: number;
+  marketCap: number;
+  realizedCap: number;
+  updatedAt: string;
+  history: MvrvPoint[];
+  source: { name: string; url: string; methodology: string };
+};
 
 const watchlist: WatchItem[] = [
   {
@@ -295,6 +307,101 @@ function downloadCsv(entries: TradeEntry[]) {
   URL.revokeObjectURL(url);
 }
 
+function formatUsd(value: number) {
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function mvrvRegime(value: number) {
+  if (value < 0) return { label: "历史低估区", tone: "opportunity", note: "市场市值低于已实现价值，仍需结合仓位纪律验证。" };
+  if (value >= 7) return { label: "历史过热区", tone: "risk", note: "估值偏离达到历史极端，优先审视风险和仓位。" };
+  if (value >= 3.5) return { label: "偏热观察区", tone: "caution", note: "链上未实现利润偏高，避免仅凭动量追价。" };
+  return { label: "常态区间", tone: "neutral", note: "尚未进入经典周期极值区，不构成单独行动信号。" };
+}
+
+function MvrvChart({ points }: { points: MvrvPoint[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || points.length < 2) return;
+    const draw = () => {
+      const bounds = canvas.getBoundingClientRect();
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.floor(bounds.width * ratio));
+      canvas.height = Math.max(1, Math.floor(bounds.height * ratio));
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.scale(ratio, ratio);
+      const width = bounds.width;
+      const height = bounds.height;
+      const padding = { top: 18, right: 12, bottom: 24, left: 34 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+      const minY = Math.min(-0.5, ...points.map((point) => point.value));
+      const maxY = Math.max(7.5, ...points.map((point) => point.value));
+      const x = (index: number) => padding.left + (index / (points.length - 1)) * chartWidth;
+      const y = (value: number) => padding.top + ((maxY - value) / (maxY - minY)) * chartHeight;
+
+      context.clearRect(0, 0, width, height);
+      context.font = "11px Arial";
+      context.textAlign = "right";
+      [0, 3.5, 7].forEach((level) => {
+        const lineY = y(level);
+        context.strokeStyle = level === 7 ? "rgba(216,134,115,.55)" : level === 0 ? "rgba(134,185,143,.5)" : "rgba(150,158,152,.22)";
+        context.setLineDash(level === 3.5 ? [4, 5] : []);
+        context.beginPath();
+        context.moveTo(padding.left, lineY);
+        context.lineTo(width - padding.right, lineY);
+        context.stroke();
+        context.fillStyle = "#8f9992";
+        context.fillText(String(level), padding.left - 7, lineY + 4);
+      });
+      context.setLineDash([]);
+
+      const gradient = context.createLinearGradient(0, padding.top, 0, height - padding.bottom);
+      gradient.addColorStop(0, "rgba(214,179,106,.28)");
+      gradient.addColorStop(1, "rgba(214,179,106,0)");
+      context.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) context.moveTo(x(index), y(point.value));
+        else context.lineTo(x(index), y(point.value));
+      });
+      context.lineTo(x(points.length - 1), height - padding.bottom);
+      context.lineTo(x(0), height - padding.bottom);
+      context.closePath();
+      context.fillStyle = gradient;
+      context.fill();
+
+      context.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) context.moveTo(x(index), y(point.value));
+        else context.lineTo(x(index), y(point.value));
+      });
+      context.strokeStyle = "#d6b36a";
+      context.lineWidth = 2;
+      context.lineJoin = "round";
+      context.stroke();
+
+      const last = points.at(-1)!;
+      context.beginPath();
+      context.arc(x(points.length - 1), y(last.value), 4, 0, Math.PI * 2);
+      context.fillStyle = "#f2efe7";
+      context.fill();
+    };
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [points]);
+
+  return <canvas ref={canvasRef} role="img" aria-label="Bitcoin MVRV Z-Score 最近 365 天走势图，参考线为 0、3.5 和 7" />;
+}
+
 export default function Home() {
   const [trade, setTrade] = useState<TradeEntry>(defaultTrade);
   const [entries, setEntries] = useState<TradeEntry[]>([]);
@@ -303,6 +410,8 @@ export default function Home() {
   const [weeklyNotes, setWeeklyNotes] = useState("本周只在高确定性资产出现安全边际时行动；没有好价格，现金也是仓位。");
   const [syncState, setSyncState] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [message, setMessage] = useState("正在同步个人决策日志…");
+  const [mvrvData, setMvrvData] = useState<MvrvData | null>(null);
+  const [mvrvState, setMvrvState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     let active = true;
@@ -327,6 +436,26 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    fetch("/api/crypto/mvrv-z")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("mvrv unavailable");
+        return (await response.json()) as MvrvData;
+      })
+      .then((data) => {
+        if (!active) return;
+        setMvrvData(data);
+        setMvrvState("ready");
+      })
+      .catch(() => {
+        if (active) setMvrvState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const ranked = useMemo(() => [...watchlist].sort((a, b) => score(b) - score(a)), []);
   const activeGroup = accountGroups.find((group) => group.id === activeGroupId) ?? accountGroups[0];
   const activeSecurity = accountSecurities.find((item) => item.ticker === activeTicker) ?? accountSecurities[0];
@@ -337,6 +466,7 @@ export default function Home() {
   const accountSecurityCount = accountSecurities.length;
   const allGatesPassed = (Object.keys(gateLabels) as GateKey[]).every((gate) => trade.gates.includes(gate));
   const canSave = trade.action === "不行动" || allGatesPassed;
+  const mvrvSignal = mvrvData ? mvrvRegime(mvrvData.zScore) : null;
 
   const weeklySummary = [
     `本周动作：共记录 ${entries.length} 笔决策，其中 ${entries.filter((entry) => entry.action === "买入" || entry.action === "加仓").length} 笔增加风险敞口。`,
@@ -441,7 +571,7 @@ export default function Home() {
           </a>
           <div className="nav-actions">
             <span className={`sync-status ${syncState}`}><i />{message}</span>
-            <a href="#trade">写开单理由</a>
+            <a href="#crypto">看 BTC 链上</a>
             <a href="#weekly">看本周报告</a>
           </div>
         </nav>
@@ -483,6 +613,51 @@ export default function Home() {
               <span>硬规则</span>
               <p>单一公司原则上不超过 15%；BTC 不超过 15%；新仓分 3–4 次进入。</p>
             </div>
+          </aside>
+        </div>
+      </section>
+
+      <section className="section-shell crypto-section" id="crypto" aria-labelledby="mvrv-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">BITCOIN ON-CHAIN VALUATION</p><h2 id="mvrv-title">MVRV Z-Score</h2></div>
+          <p>最近 365 天 · 日频 <span>链上数据通常滞后 1–2 天</span></p>
+        </div>
+        <div className="mvrv-grid">
+          <article className="mvrv-chart-panel">
+            <div className="mvrv-chart-heading">
+              <div>
+                <span>当前读数</span>
+                <strong>{mvrvData ? mvrvData.zScore.toFixed(2) : "—"}</strong>
+              </div>
+              {mvrvSignal && <span className={`mvrv-regime ${mvrvSignal.tone}`}>{mvrvSignal.label}</span>}
+            </div>
+            <div className={`mvrv-chart ${mvrvState}`}>
+              {mvrvData ? <MvrvChart points={mvrvData.history} /> : (
+                <div className="mvrv-placeholder">
+                  <strong>{mvrvState === "error" ? "链上数据暂不可用" : "正在读取链上数据…"}</strong>
+                  <span>{mvrvState === "error" ? "不会用演示数据替代，请稍后刷新。" : "正在核对市场市值与已实现市值。"}</span>
+                </div>
+              )}
+            </div>
+            <div className="mvrv-axis-notes"><span>低估区 ≤ 0</span><span>观察线 3.5</span><span>历史过热区 ≥ 7</span></div>
+          </article>
+
+          <aside className="mvrv-context-panel">
+            <p className="eyebrow">VALUATION CONTEXT</p>
+            <h3>{mvrvSignal?.label ?? "等待数据"}</h3>
+            <p className="mvrv-interpretation">{mvrvSignal?.note ?? "指标就绪后显示当前估值区间。"}</p>
+            <dl className="mvrv-facts">
+              <div><dt>市场市值</dt><dd>{mvrvData ? formatUsd(mvrvData.marketCap) : "—"}</dd></div>
+              <div><dt>已实现市值</dt><dd>{mvrvData ? formatUsd(mvrvData.realizedCap) : "—"}</dd></div>
+              <div><dt>数据日期</dt><dd>{mvrvData ? new Date(mvrvData.updatedAt).toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" }) : "—"}</dd></div>
+            </dl>
+            <div className="mvrv-formula">
+              <span>经典公式</span>
+              <code>(市场市值 − 已实现市值) ÷ 市场市值历史标准差</code>
+            </div>
+            <p className="mvrv-source">
+              方法参考 TradingView 公开指标；实时序列来自 {mvrvData?.source.name ?? "BTCFunk"}。这是周期估值温度计，不是买卖信号。
+            </p>
           </aside>
         </div>
       </section>
