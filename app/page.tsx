@@ -44,6 +44,22 @@ type TradeEntry = {
   createdAt?: string;
 };
 
+type PortfolioPosition = {
+  ticker: string;
+  name: string;
+  assetClass: "stock" | "btc";
+  quantity: string;
+  averageCost: string;
+  currentPrice: string;
+  targetWeight: string;
+};
+
+type PortfolioSnapshot = {
+  cashBalance: string;
+  positions: PortfolioPosition[];
+  updatedAt?: string;
+};
+
 type GateKey = "leader" | "understood" | "margin" | "sizing" | "invalidation";
 
 type MvrvPoint = { date: string; value: number };
@@ -402,9 +418,28 @@ function MvrvChart({ points }: { points: MvrvPoint[] }) {
   return <canvas ref={canvasRef} role="img" aria-label="Bitcoin MVRV Z-Score 最近 365 天走势图，参考线为 0、3.5 和 7" />;
 }
 
+function numberValue(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: value >= 1000 ? 0 : 2,
+  }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${value.toFixed(1)}%`;
+}
+
 export default function Home() {
   const [trade, setTrade] = useState<TradeEntry>(defaultTrade);
   const [entries, setEntries] = useState<TradeEntry[]>([]);
+  const [portfolio, setPortfolio] = useState<PortfolioSnapshot>({ cashBalance: "", positions: [] });
+  const [nextPositionTicker, setNextPositionTicker] = useState("BRK.B");
   const [activeGroupId, setActiveGroupId] = useState("technology");
   const [activeTicker, setActiveTicker] = useState("GOOGL");
   const [weeklyNotes, setWeeklyNotes] = useState("本周只在高确定性资产出现安全边际时行动；没有好价格，现金也是仓位。");
@@ -415,13 +450,15 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetch("/api/trades"), fetch("/api/settings")])
-      .then(async ([tradesResponse, settingsResponse]) => {
-        if (!tradesResponse.ok || !settingsResponse.ok) throw new Error("sync failed");
+    Promise.all([fetch("/api/trades"), fetch("/api/settings"), fetch("/api/portfolio")])
+      .then(async ([tradesResponse, settingsResponse, portfolioResponse]) => {
+        if (!tradesResponse.ok || !settingsResponse.ok || !portfolioResponse.ok) throw new Error("sync failed");
         const tradeData = (await tradesResponse.json()) as { entries: TradeEntry[] };
         const settingsData = (await settingsResponse.json()) as { weeklyNotes?: string };
+        const portfolioData = (await portfolioResponse.json()) as PortfolioSnapshot;
         if (!active) return;
         setEntries(tradeData.entries);
+        setPortfolio(portfolioData);
         if (settingsData.weeklyNotes) setWeeklyNotes(settingsData.weeklyNotes);
         setSyncState("ready");
         setMessage("决策日志已云端同步");
@@ -467,10 +504,33 @@ export default function Home() {
   const allGatesPassed = (Object.keys(gateLabels) as GateKey[]).every((gate) => trade.gates.includes(gate));
   const canSave = trade.action === "不行动" || allGatesPassed;
   const mvrvSignal = mvrvData ? mvrvRegime(mvrvData.zScore) : null;
+  const portfolioRows = portfolio.positions.map((position) => {
+    const marketValue = numberValue(position.quantity) * numberValue(position.currentPrice);
+    const costValue = numberValue(position.quantity) * numberValue(position.averageCost);
+    return { ...position, marketValue, costValue, pnl: marketValue - costValue };
+  });
+  const investedValue = portfolioRows.reduce((sum, position) => sum + position.marketValue, 0);
+  const cashValue = numberValue(portfolio.cashBalance);
+  const portfolioValue = investedValue + cashValue;
+  const stockValue = portfolioRows.filter((position) => position.assetClass === "stock").reduce((sum, position) => sum + position.marketValue, 0);
+  const bitcoinValue = portfolioRows.filter((position) => position.assetClass === "btc").reduce((sum, position) => sum + position.marketValue, 0);
+  const stockWeight = portfolioValue ? (stockValue / portfolioValue) * 100 : 0;
+  const bitcoinWeight = portfolioValue ? (bitcoinValue / portfolioValue) * 100 : 0;
+  const cashWeight = portfolioValue ? (cashValue / portfolioValue) * 100 : 0;
+  const totalPnl = portfolioRows.reduce((sum, position) => sum + position.pnl, 0);
+  const largestCompanyWeight = portfolioValue
+    ? Math.max(0, ...portfolioRows.filter((position) => position.assetClass === "stock").map((position) => (position.marketValue / portfolioValue) * 100))
+    : 0;
+  const allocationAlerts = [
+    largestCompanyWeight > 15 ? `最大单一公司仓位 ${formatPercent(largestCompanyWeight)}，超过 15% 护栏` : "",
+    bitcoinWeight > 15 ? `BTC 仓位 ${formatPercent(bitcoinWeight)}，超过 15% 护栏` : "",
+    portfolioValue && (cashWeight < 10 || cashWeight > 25) ? `现金仓位 ${formatPercent(cashWeight)}，偏离 10–25% 区间` : "",
+  ].filter(Boolean);
 
   const weeklySummary = [
     `本周动作：共记录 ${entries.length} 笔决策，其中 ${entries.filter((entry) => entry.action === "买入" || entry.action === "加仓").length} 笔增加风险敞口。`,
     `观察池：Longbridge 自选包含 ${accountGroups.length} 个分组、${accountSecurityCount} 个标的；其中 ${watchlist.filter((item) => accountSecurities.some((security) => security.ticker === item.ticker)).length} 个已有个人研究档案。`,
+    `组合实况：总资产 ${formatMoney(portfolioValue)}，股票 ${formatPercent(stockWeight)}，BTC ${formatPercent(bitcoinWeight)}，现金 ${formatPercent(cashWeight)}。`,
     `策略基线：买入研究区 ${buyZoneCount} 个，等待价格 ${waitCount} 个。当前优先研究 ${ranked[0].ticker}，策略分 ${score(ranked[0])}/100。`,
     "纪律：先确认商业确定性与安全边际，再决定仓位；任何开单必须写清证伪条件。",
     `本周主观判断：${weeklyNotes}`,
@@ -507,6 +567,57 @@ export default function Home() {
   function selectGroup(group: AccountGroup) {
     setActiveGroupId(group.id);
     setActiveTicker(group.securities[0]?.ticker ?? "GOOGL");
+  }
+
+  function addPosition() {
+    if (portfolio.positions.some((position) => position.ticker === nextPositionTicker)) {
+      setMessage(`${nextPositionTicker} 已在持仓中`);
+      return;
+    }
+    const security = tradeSecurities.find((item) => item.ticker === nextPositionTicker);
+    if (!security) return;
+    setPortfolio((current) => ({
+      ...current,
+      positions: [...current.positions, {
+        ticker: security.ticker,
+        name: security.name,
+        assetClass: security.ticker === "BTC" ? "btc" : "stock",
+        quantity: "",
+        averageCost: "",
+        currentPrice: "",
+        targetWeight: "",
+      }],
+    }));
+  }
+
+  function updatePosition(ticker: string, field: keyof PortfolioPosition, value: string) {
+    setPortfolio((current) => ({
+      ...current,
+      positions: current.positions.map((position) => position.ticker === ticker ? { ...position, [field]: value } : position),
+    }));
+  }
+
+  function removePosition(ticker: string) {
+    setPortfolio((current) => ({ ...current, positions: current.positions.filter((position) => position.ticker !== ticker) }));
+  }
+
+  async function savePortfolio() {
+    setSyncState("saving");
+    setMessage("正在保存组合实况…");
+    try {
+      const response = await fetch("/api/portfolio", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(portfolio),
+      });
+      if (!response.ok) throw new Error("save failed");
+      setPortfolio((await response.json()) as PortfolioSnapshot);
+      setSyncState("ready");
+      setMessage("组合持仓与现金已云端同步");
+    } catch {
+      setSyncState("error");
+      setMessage("组合保存失败，输入仍保留在页面中");
+    }
   }
 
   async function saveTrade() {
@@ -572,16 +683,19 @@ export default function Home() {
           <div className="nav-actions">
             <span className={`sync-status ${syncState}`}><i />{message}</span>
             <a href="#crypto">看 BTC 链上</a>
+            <a href="#portfolio">组合实况</a>
+            <a href="#trade">写开单理由</a>
+            <a href="#crypto">BTC 链上</a>
             <a href="#weekly">看本周报告</a>
           </div>
         </nav>
 
         <div className="hero-grid" id="top">
           <section className="decision-panel" aria-labelledby="today-title">
-            <p className="eyebrow">TODAY'S DEFAULT</p>
+            <p className="eyebrow">TODAY&apos;S DEFAULT</p>
             <div className="decision-title-row">
               <h1 id="today-title">先不行动。</h1>
-              <span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date())}</span>
+              <span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", timeZone: "Asia/Shanghai" }).format(new Date())}</span>
             </div>
             <p className="decision-copy">
               除非行业龙头、商业确定性、安全边际和仓位上限同时成立。错过机会不会伤害组合，失去纪律会。
@@ -599,19 +713,19 @@ export default function Home() {
           <aside className="allocation-panel" aria-labelledby="allocation-title">
             <p className="eyebrow">PORTFOLIO GUARDRAILS</p>
             <h2 id="allocation-title">组合护栏</h2>
-            <div className="allocation-visual" aria-label="目标仓位区间">
-              <span className="core" style={{ flex: 68 }}>龙头股</span>
-              <span className="bitcoin" style={{ flex: 12 }}>BTC</span>
-              <span className="cash" style={{ flex: 20 }}>现金</span>
+            <div className="allocation-visual" aria-label={portfolioValue ? "当前仓位" : "目标仓位示例"}>
+              <span className="core" style={{ flex: portfolioValue ? Math.max(stockWeight, 0.1) : 68 }}>龙头股</span>
+              <span className="bitcoin" style={{ flex: portfolioValue ? Math.max(bitcoinWeight, 0.1) : 12 }}>BTC</span>
+              <span className="cash" style={{ flex: portfolioValue ? Math.max(cashWeight, 0.1) : 20 }}>现金</span>
             </div>
             <div className="allocation-list">
-              <div><span>核心龙头股</span><strong>60–75%</strong></div>
-              <div><span>Bitcoin</span><strong>5–15%</strong></div>
-              <div><span>机会现金</span><strong>10–25%</strong></div>
+              <div><span>核心龙头股 · 目标 60–75%</span><strong>{portfolioValue ? formatPercent(stockWeight) : "待录入"}</strong></div>
+              <div><span>Bitcoin · 目标 5–15%</span><strong>{portfolioValue ? formatPercent(bitcoinWeight) : "待录入"}</strong></div>
+              <div><span>机会现金 · 目标 10–25%</span><strong>{portfolioValue ? formatPercent(cashWeight) : "待录入"}</strong></div>
             </div>
             <div className="risk-note">
-              <span>硬规则</span>
-              <p>单一公司原则上不超过 15%；BTC 不超过 15%；新仓分 3–4 次进入。</p>
+              <span>{allocationAlerts.length ? "需要复核" : "硬规则"}</span>
+              <p>{allocationAlerts[0] ?? "单一公司原则上不超过 15%；BTC 不超过 15%；新仓分 3–4 次进入。"}</p>
             </div>
           </aside>
         </div>
@@ -659,6 +773,60 @@ export default function Home() {
               方法参考 TradingView 公开指标；实时序列来自 {mvrvData?.source.name ?? "BTCFunk"}。这是周期估值温度计，不是买卖信号。
             </p>
           </aside>
+        </div>
+      </section>
+
+      <section className="section-shell portfolio-section" id="portfolio" aria-labelledby="portfolio-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">PORTFOLIO REALITY</p><h2 id="portfolio-title">用真实仓位约束下一笔交易</h2></div>
+          <p>价格由你手动更新，系统不把静态数据冒充实时行情。<span>{portfolio.updatedAt ? `上次保存 ${new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(portfolio.updatedAt))}` : "尚未保存组合快照"}</span></p>
+        </div>
+
+        <div className="portfolio-metrics" aria-label="组合摘要">
+          <div><span>总资产</span><strong>{formatMoney(portfolioValue)}</strong><small>持仓市值 + 现金</small></div>
+          <div><span>持仓盈亏</span><strong className={totalPnl < 0 ? "is-negative" : ""}>{formatMoney(totalPnl)}</strong><small>按录入成本与现价</small></div>
+          <div><span>最大公司仓位</span><strong className={largestCompanyWeight > 15 ? "is-negative" : ""}>{formatPercent(largestCompanyWeight)}</strong><small>护栏 ≤ 15%</small></div>
+          <div><span>现金比例</span><strong className={portfolioValue && (cashWeight < 10 || cashWeight > 25) ? "is-negative" : ""}>{formatPercent(cashWeight)}</strong><small>目标 10–25%</small></div>
+        </div>
+
+        <div className="portfolio-panel">
+          <div className="portfolio-toolbar">
+            <label>机会现金（USD）<input inputMode="decimal" min="0" placeholder="0" type="number" value={portfolio.cashBalance} onChange={(event) => setPortfolio((current) => ({ ...current, cashBalance: event.target.value }))} /></label>
+            <div className="add-position">
+              <label>添加持仓<select value={nextPositionTicker} onChange={(event) => setNextPositionTicker(event.target.value)}>{tradeSecurities.map((item) => <option key={item.ticker} value={item.ticker}>{item.ticker} · {item.name}</option>)}</select></label>
+              <button className="ghost-button" onClick={addPosition} type="button">加入组合</button>
+            </div>
+            <button className="primary-button portfolio-save" disabled={syncState === "saving"} onClick={savePortfolio} type="button">保存组合快照</button>
+          </div>
+
+          {portfolioRows.length === 0 ? (
+            <div className="portfolio-empty"><strong>先添加第一个真实持仓</strong><p>录入数量、平均成本、当前价格和目标仓位后，组合集中度、盈亏和风险提示会自动计算。</p></div>
+          ) : (
+            <div className="position-table-wrap">
+              <table className="position-table">
+                <thead><tr><th>标的</th><th>数量</th><th>平均成本</th><th>当前价格</th><th>目标仓位</th><th>当前仓位</th><th>市值 / 盈亏</th><th><span className="sr-only">操作</span></th></tr></thead>
+                <tbody>{portfolioRows.map((position) => {
+                  const actualWeight = portfolioValue ? (position.marketValue / portfolioValue) * 100 : 0;
+                  const targetWeight = numberValue(position.targetWeight);
+                  const gap = actualWeight - targetWeight;
+                  return (
+                    <tr key={position.ticker}>
+                      <td><strong>{position.ticker}</strong><small>{position.name}</small></td>
+                      <td><input aria-label={`${position.ticker} 数量`} inputMode="decimal" min="0" type="number" value={position.quantity} onChange={(event) => updatePosition(position.ticker, "quantity", event.target.value)} /></td>
+                      <td><input aria-label={`${position.ticker} 平均成本`} inputMode="decimal" min="0" type="number" value={position.averageCost} onChange={(event) => updatePosition(position.ticker, "averageCost", event.target.value)} /></td>
+                      <td><input aria-label={`${position.ticker} 当前价格`} inputMode="decimal" min="0" type="number" value={position.currentPrice} onChange={(event) => updatePosition(position.ticker, "currentPrice", event.target.value)} /></td>
+                      <td><div className="percent-input"><input aria-label={`${position.ticker} 目标仓位`} inputMode="decimal" max="100" min="0" type="number" value={position.targetWeight} onChange={(event) => updatePosition(position.ticker, "targetWeight", event.target.value)} /><span>%</span></div></td>
+                      <td><strong>{formatPercent(actualWeight)}</strong>{targetWeight > 0 && <small className={Math.abs(gap) > 2 ? "is-negative" : ""}>{gap > 0 ? "+" : ""}{formatPercent(gap)} vs 目标</small>}</td>
+                      <td><strong>{formatMoney(position.marketValue)}</strong><small className={position.pnl < 0 ? "is-negative" : "is-positive"}>{position.pnl >= 0 ? "+" : ""}{formatMoney(position.pnl)}</small></td>
+                      <td><button aria-label={`删除 ${position.ticker}`} className="remove-position" onClick={() => removePosition(position.ticker)} type="button">移除</button></td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          )}
+
+          {allocationAlerts.length > 0 && <div className="portfolio-alerts" role="status">{allocationAlerts.map((alert) => <span key={alert}>{alert}</span>)}</div>}
         </div>
       </section>
 

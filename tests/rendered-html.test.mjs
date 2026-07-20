@@ -19,6 +19,10 @@ test("renders the investment decision cockpit", async () => {
   assert.match(page, /半导体/);
   assert.match(page, /金融/);
   assert.match(page, /存储/);
+  assert.match(page, /PORTFOLIO REALITY/);
+  assert.match(page, /保存组合快照/);
+  assert.match(page, /不把静态数据冒充实时行情/);
+  assert.match(page, /timeZone: "Asia\/Shanghai"/);
   assert.match(page, /关注不等于买入建议/);
   assert.match(page, /MVRV Z-Score/);
   assert.match(page, /市场市值 − 已实现市值/);
@@ -37,16 +41,23 @@ test("proxies a validated live MVRV Z-Score feed", async () => {
 });
 
 test("uses durable storage for the decision ledger", async () => {
-  const [page, hosting, schema, migration] = await Promise.all([
+  const [page, hosting, schema, migration, portfolioRoute, portfolioMigration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0000_wandering_abomination.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/portfolio/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0001_workable_karnak.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(hosting, /"d1": "DB"/);
   assert.match(schema, /trade_entries/);
   assert.match(migration, /CREATE TABLE `trade_entries`/);
   assert.match(page, /fetch\("\/api\/trades"\)/);
+  assert.match(page, /fetch\("\/api\/portfolio"\)/);
+  assert.match(portfolioRoute, /portfolio_positions/);
+  assert.match(portfolioRoute, /database\.batch/);
+  assert.match(portfolioMigration, /CREATE TABLE `portfolio_positions`/);
+  assert.match(schema, /portfolioConfig/);
   assert.doesNotMatch(page, /localStorage|sessionStorage/);
 });
